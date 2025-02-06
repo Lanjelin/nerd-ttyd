@@ -1,0 +1,114 @@
+name: Scheduled Update
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  push:
+    paths-ignore:
+      - "**.md"
+      - "**.yaml"
+  pull_request:
+  workflow_dispatch:
+
+
+jobs:
+  do-stuff-pretty-please:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check versions
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.API_TOKEN }}
+        run: |
+          EXT_TTYD=$(curl --silent "https://api.github.com/repos/tsl0922/ttyd/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)
+          if [ -z "${EXT_TTYD}" ]; then
+            echo "**** Can't retrieve external release of ttyd, exiting ****"
+            exit 1
+          fi
+          NERD_TTYD=${NERD_TTYD:-$(curl --silent "https://api.github.com/repos/Lanjelin/nerd-ttyd/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)}
+          if [ -z "${NERD_TTYD}" ]; then
+            echo "**** Can't retrieve latest build of nerd_ttyd, exiting ****"
+            exit 1
+          fi
+          if [ "${EXT_TTYD}" == "${NERD_TTYD}" ]; then
+            echo "**** Version ${NERD_TTYD} already built, exiting ****"
+            exit 0
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${EXT_TTYD}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Build
+        id: build
+        if: 'steps.check.outputs.build'
+        run: |
+          # cd /
+          git clone --depth 1 https://github.com/tsl0922/ttyd ttyd
+
+          # Patch
+          cp -r html ttyd/
+          cat index.scss >>ttyd/html/src/style/index.scss
+          sed -i -e "/rules: \[/r webpack.config.js" -i -e "/rules: \[/d" ttyd/html/webpack.config.js
+
+          # Frontend
+          pushd ttyd/html 1>/dev/null
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
+          yarn install
+          yarn run check
+          yarn run build
+          popd 1>/dev/null
+
+          # Backend
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake build-essential cmake curl file libtool
+          mkdir -p release
+          BUILD_ARCHS="i686 x86_64 arm armhf aarch64 mips mipsel mips64 mips64el s390x win32"
+          pushd ttyd 1>/dev/null
+          for arch in $BUILD_ARCHS; do
+            if [[ -f build ]]; then
+              rm -rf build
+            fi
+            echo "**** Building for $arch ****"
+            BUILD_TARGET="$arch" scripts/cross-build.sh >/dev/null 2>&1 #>/dev/null 2>&1  1>/dev/null
+            if [ "$arch" = 'win32' ]; then
+              mv build/ttyd* ../release/ttyd."$arch".exe
+            else
+              mv build/ttyd* ../release/ttyd."$arch"
+            fi
+          done
+          popd 1>/dev/null
+          pushd release 1>/dev/null
+          if [ $(ls -1 | wc -l) == $(
+            c() { echo $#; }
+            c $BUILD_ARCHS
+          ) ]; then
+            sha256sum ttyd.* >SHA256SUMS
+          else
+            echo "**** Build count mismatch ****"
+            exit 1
+          fi
+          popd 1>/dev/null
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Release
+        id: release
+        if: 'steps.build.outputs.release'
+        uses: ncipollo/release-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.API_TOKEN }}
+        with:
+          token: ${{ secrets.API_TOKEN }}
+          artifacts: "release/*"
+          tag: "${{ steps.check.outputs.tag }}"
+          name: "nerd-ttyd ${{ steps.check.outputs.tag }} "
+          body: "Update nerd-ttyd to ${{ steps.check.outputs.tag }} of ttyd."
