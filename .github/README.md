@@ -1,7 +1,7 @@
 # ttyd - Share your terminal over the web
 
 ttyd is a simple command-line tool for sharing terminal over the web.  
-This repo offers an automatic build on latest version that includes `JetBrains NerdFont``, and the Chinese font `Sarasa Mono SC`.  
+This repo offers an automatic build on latest version that includes `JetBrains NerdFont`, and the Chinese font `Sarasa Mono SC`.  
 
 ## Installation
 
