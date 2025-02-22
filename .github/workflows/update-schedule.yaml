@@ -43,6 +43,7 @@ jobs:
           fi
 
       - name: Set up Node.js
+        if: 'steps.check.outputs.build'
         uses: actions/setup-node@v4
         with:
           node-version: 18
