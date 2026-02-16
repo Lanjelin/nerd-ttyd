@@ -76,8 +76,8 @@ jobs:
           cp -r html ttyd/
           cat index.scss >>ttyd/html/src/style/index.scss
           sed -i -e "/rules: \[/r webpack.config.js" -i -e "/rules: \[/d" ttyd/html/webpack.config.js
-          sed -i 's/this.xterm.open(this.container)/await document.fonts.ready;\n        this.xterm.open(this.container)/' ttyd/html/src/components/terminal/index.tsx
-          sed -i '/terminal.open(parent);/{n;s/fitAddon.fit();/fitAddon.fit();\n        setTimeout(() => fitAddon.fit(), 100);\n        setTimeout(() => fitAddon.fit(), 500);/}' ttyd/html/src/components/terminal/xterm/index.ts
+          sed -i "s/this.xterm.open(this.container)/await document.fonts.load('14px JetBrains');\n        this.xterm.open(this.container)/" ttyd/html/src/components/terminal/index.tsx
+          sed -i '/terminal.open(parent);/{n;s/fitAddon.fit();/fitAddon.fit();\n        setTimeout(() => { const fs = terminal.options.fontSize || 14; terminal.options.fontSize = fs + 1; terminal.options.fontSize = fs; fitAddon.fit(); }, 250);\n        setTimeout(() => { const fs = terminal.options.fontSize || 14; terminal.options.fontSize = fs + 1; terminal.options.fontSize = fs; fitAddon.fit(); }, 1000);/}' ttyd/html/src/components/terminal/xterm/index.ts
 
           # Frontend
           pushd ttyd/html 1>/dev/null
@@ -129,4 +129,4 @@ jobs:
           artifacts: "release/*"
           tag: "${{ steps.check.outputs.tag || steps.force.outputs.tag }}"
           name: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }}"
-          body: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }} with font-display:block and document.fonts.ready fixes."
+          body: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }} with font-display:block, document.fonts.load, and fontSize toggle re-measure fixes."
