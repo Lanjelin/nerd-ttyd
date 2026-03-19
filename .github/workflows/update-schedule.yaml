@@ -9,6 +9,11 @@ on:
       - "**.yaml"
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag override (e.g., 1.7.7-fontfix.1). Forces build, skips version check.'
+        required: false
+        type: string
 
 
 jobs:
@@ -21,18 +26,19 @@ jobs:
 
       - name: Check versions
         id: check
+        if: ${{ !inputs.tag }}
         env:
-          GITHUB_TOKEN: ${{ secrets.API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           EXT_TTYD=$(curl --silent "https://api.github.com/repos/tsl0922/ttyd/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)
           if [ -z "${EXT_TTYD}" ]; then
             echo "**** Can't retrieve external release of ttyd, exiting ****"
             exit 1
           fi
-          NERD_TTYD=${NERD_TTYD:-$(curl --silent "https://api.github.com/repos/Lanjelin/nerd-ttyd/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)}
+          NERD_TTYD=${NERD_TTYD:-$(curl --silent "https://api.github.com/repos/${{ github.repository }}/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)}
           if [ -z "${NERD_TTYD}" ]; then
-            echo "**** Can't retrieve latest build of nerd_ttyd, exiting ****"
-            exit 1
+            echo "**** No existing tags, proceeding with build ****"
+            NERD_TTYD="0.0.0"
           fi
           if [ "${EXT_TTYD}" == "${NERD_TTYD}" ]; then
             echo "**** Version ${NERD_TTYD} already built, exiting ****"
@@ -42,23 +48,36 @@ jobs:
             echo "tag=${EXT_TTYD}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Force build with custom tag
+        id: force
+        if: ${{ inputs.tag }}
+        run: |
+          EXT_TTYD=$(curl --silent "https://api.github.com/repos/tsl0922/ttyd/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)
+          if [ -z "${EXT_TTYD}" ]; then
+            echo "**** Can't retrieve external release of ttyd, exiting ****"
+            exit 1
+          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+          echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
-        if: 'steps.check.outputs.build'
+        if: steps.check.outputs.build || steps.force.outputs.build
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
       - name: Build
         id: build
-        if: 'steps.check.outputs.build'
+        if: steps.check.outputs.build || steps.force.outputs.build
         run: |
-          # cd /
           git clone --depth 1 https://github.com/tsl0922/ttyd ttyd
 
           # Patch
           cp -r html ttyd/
           cat index.scss >>ttyd/html/src/style/index.scss
           sed -i -e "/rules: \[/r webpack.config.js" -i -e "/rules: \[/d" ttyd/html/webpack.config.js
+          sed -i "s/this.xterm.open(this.container)/await document.fonts.load('14px JetBrains');\n        this.xterm.open(this.container)/" ttyd/html/src/components/terminal/index.tsx
+          sed -i '/terminal.open(parent);/{n;s/fitAddon.fit();/fitAddon.fit();\n        setTimeout(() => {\n            const fs = terminal.options.fontSize || 14;\n            terminal.options.fontSize = fs + 1;\n            terminal.options.fontSize = fs;\n            fitAddon.fit();\n        }, 250);\n        setTimeout(() => {\n            const fs = terminal.options.fontSize || 14;\n            terminal.options.fontSize = fs + 1;\n            terminal.options.fontSize = fs;\n            fitAddon.fit();\n        }, 1000);/}' ttyd/html/src/components/terminal/xterm/index.ts
 
           # Frontend
           pushd ttyd/html 1>/dev/null
@@ -80,7 +99,7 @@ jobs:
               rm -rf build
             fi
             echo "**** Building for $arch ****"
-            BUILD_TARGET="$arch" scripts/cross-build.sh >/dev/null 2>&1 #>/dev/null 2>&1  1>/dev/null
+            BUILD_TARGET="$arch" scripts/cross-build.sh >/dev/null 2>&1
             if [ "$arch" = 'win32' ]; then
               mv build/ttyd* ../release/ttyd."$arch".exe
             else
@@ -103,13 +122,11 @@ jobs:
 
       - name: Release
         id: release
-        if: 'steps.build.outputs.release'
+        if: steps.build.outputs.release
         uses: ncipollo/release-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.API_TOKEN }}
         with:
-          token: ${{ secrets.API_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: "release/*"
-          tag: "${{ steps.check.outputs.tag }}"
-          name: "nerd-ttyd ${{ steps.check.outputs.tag }} "
-          body: "Update nerd-ttyd to ${{ steps.check.outputs.tag }} of ttyd."
+          tag: "${{ steps.check.outputs.tag || steps.force.outputs.tag }}"
+          name: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }}"
+          body: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }} with font-display:block, document.fonts.load, and fontSize toggle re-measure fixes."
