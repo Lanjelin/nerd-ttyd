@@ -1,0 +1,35 @@
+FROM ubuntu:24.04 AS build
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG BUILD_ARCHS="i686 x86_64 arm armhf aarch64 mips mipsel mips64 mips64el s390x win32"
+ENV BUILD_ARCHS="${BUILD_ARCHS}"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN \
+  apt-get update && apt-get install -y \
+  autoconf \
+  automake \
+  build-essential \
+  cmake \
+  curl \
+  file \
+  git \
+  libtool \
+  nodejs \
+  npm \
+  patch && \
+  rm -rf /var/lib/apt/lists/* && \
+  npm install -g corepack && \
+  curl -fsSL https://taskfile.dev/install.sh | sh -s -- -d -b /usr/local/bin
+
+WORKDIR /workspace
+
+COPY . .
+
+ENV OUT_DIR=/release
+RUN task docker:build
+
+# Export stage
+FROM scratch AS export
+COPY --from=build /release/ /

@@ -1,0 +1,151 @@
+version: "3"
+
+vars:
+  OUT_DIR: release
+  DEFAULT_ARCHS: i686 x86_64 arm armhf aarch64 mips mipsel mips64 mips64el s390x win32
+
+tasks:
+  build:
+    desc: Build ttyd binaries using docker (ARCHS="x86_64 aarch64" task build)
+    cmds:
+      - rm -rf {{.OUT_DIR}}
+      - mkdir -p {{.OUT_DIR}}
+      - |
+        docker build \
+          -f Dockerfile.build \
+          --target export \
+          --build-arg BUILD_ARCHS="{{.ARCHS | default .DEFAULT_ARCHS}}" \
+          --output type=local,dest={{.USER_WORKING_DIR}}/{{.OUT_DIR}} \
+          .
+
+  image:prepare:
+    internal: true
+    cmds:
+      - |
+        rm -rf ttyd
+        git clone --depth 1 https://github.com/tsl0922/ttyd ttyd
+        cp -r webfont ttyd/html/src/style/
+        cd ttyd && patch --forward --reject-file=- -p1 < ../nerd-ttyd.patch
+
+  image:frontend:
+    internal: true
+    deps:
+      - image:prepare
+    cmds:
+      - |
+        cd ttyd/html && \
+        corepack enable && \
+        corepack prepare yarn@latest --activate && \
+        yarn install && \
+        yarn run check && \
+        yarn run build
+
+  image:binaries:
+    internal: true
+    deps:
+      - image:frontend
+    cmds:
+      - |
+        out_dir="${OUT_DIR:-{{.OUT_DIR}}}" && \
+        mkdir -p "$out_dir" && \
+        out_dir="$(cd "$out_dir" && pwd)" && \
+        cd ttyd && \
+        for arch in ${BUILD_ARCHS:-{{.DEFAULT_ARCHS}}}; do \
+          rm -rf build; \
+          echo "**** Building for $arch ****"; \
+          BUILD_TARGET="$arch" scripts/cross-build.sh >/dev/null 2>&1; \
+          if [ "$arch" = "win32" ]; then \
+            mv build/ttyd* "$out_dir"/ttyd."$arch".exe; \
+          else \
+            mv build/ttyd* "$out_dir"/ttyd."$arch"; \
+          fi; \
+        done && \
+        cd "$out_dir" && \
+        expected_count=$(set -- ${BUILD_ARCHS:-{{.DEFAULT_ARCHS}}}; echo $#) && \
+        actual_count=$(find . -maxdepth 1 -type f -name 'ttyd.*' | wc -l) && \
+        if [ "$actual_count" = "$expected_count" ]; then \
+          sha256sum ttyd.* > SHA256SUMS; \
+        else \
+          echo "**** Build count mismatch ****"; \
+          echo "Expected: $expected_count, Got: $actual_count"; \
+          ls -la; \
+          exit 1; \
+        fi
+
+  image:build:
+    internal: true
+    cmds:
+      - task: image:binaries
+      - task: image:verify-fonts
+
+  docker:build:
+    deps:
+      - image:build
+
+  ci:deps:
+    internal: true
+    cmds:
+      - sudo apt-get update
+      - sudo apt-get install -y autoconf automake build-essential cmake curl file libtool
+
+  ci:build:
+    cmds:
+      - task: ci:deps
+      - task: image:build
+
+  clean:
+    desc: Remove generated release artifacts
+    cmds:
+      - rm -rf {{.OUT_DIR}}
+
+  image:verify-fonts:
+    internal: true
+    cmds:
+      - |
+        set -eu
+        out_dir="${OUT_DIR:-{{.OUT_DIR}}}"
+        ttyd_cmd="$out_dir/ttyd.x86_64 -p 7683 bash"
+        echo "Verifying fonts from $out_dir"
+        "$out_dir"/ttyd.x86_64 -p 7683 bash >/tmp/ttyd-fonts.log 2>&1 &
+
+        cleanup() {
+          pkill -9 -f "$ttyd_cmd" 2>/dev/null || true
+        }
+        trap cleanup EXIT
+
+        for _ in $(seq 1 30); do
+          if HTML="$(curl -fsL http://127.0.0.1:7683)"; then
+            echo "ttyd responded on port 7683"
+            break
+          fi
+          echo "Waiting for ttyd to become ready..."
+          sleep 1
+        done
+
+        if [ -z "${HTML:-}" ]; then
+          echo "Font verification server did not become ready"
+          cat /tmp/ttyd-fonts.log || true
+          exit 1
+        fi
+
+        JET=false
+        SARASA=false
+
+        if printf '%s' "$HTML" | grep -qP 'JetBrains[^"]{0,120}woff2;base64'; then
+          echo "JetBrains font OK"
+          JET=true
+        fi
+
+        if printf '%s' "$HTML" | grep -qP 'SarasaMono[^"]{0,120}woff2;base64'; then
+          echo "SarasaMono font OK"
+          SARASA=true
+        fi
+
+        if $JET && $SARASA; then
+          echo "All font patches OK"
+          exit 0
+        else
+          echo "Font patch FAILED (JetBrains=$JET, SarasaMono=$SARASA)"
+          cat /tmp/ttyd-fonts.log || true
+          exit 1
+        fi

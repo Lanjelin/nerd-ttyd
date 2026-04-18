@@ -11,10 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag override (e.g., 1.7.7-fontfix.1). Forces build, skips version check.'
+        description: "Release tag override (e.g., 1.7.7-fontfix.1). Forces build, skips version check."
         required: false
         type: string
-
 
 jobs:
   do-stuff-pretty-please:
@@ -66,58 +65,15 @@ jobs:
         with:
           node-version: 18
 
-      - name: Build
+      - name: Set up Task
+        if: steps.check.outputs.build || steps.force.outputs.build
+        uses: go-task/setup-task@v1
+
+      - name: Build and verify
         id: build
         if: steps.check.outputs.build || steps.force.outputs.build
         run: |
-          git clone --depth 1 https://github.com/tsl0922/ttyd ttyd
-
-          # Patch
-          cp -r html ttyd/
-          cat index.scss >>ttyd/html/src/style/index.scss
-          sed -i -e "/rules: \[/r webpack.config.js" -i -e "/rules: \[/d" ttyd/html/webpack.config.js
-          sed -i "s/this.xterm.open(this.container)/await document.fonts.load('14px JetBrains');\n        this.xterm.open(this.container)/" ttyd/html/src/components/terminal/index.tsx
-          sed -i '/terminal.open(parent);/{n;s/fitAddon.fit();/fitAddon.fit();\n        setTimeout(() => {\n            const fs = terminal.options.fontSize || 14;\n            terminal.options.fontSize = fs + 1;\n            terminal.options.fontSize = fs;\n            fitAddon.fit();\n        }, 250);\n        setTimeout(() => {\n            const fs = terminal.options.fontSize || 14;\n            terminal.options.fontSize = fs + 1;\n            terminal.options.fontSize = fs;\n            fitAddon.fit();\n        }, 1000);/}' ttyd/html/src/components/terminal/xterm/index.ts
-
-          # Frontend
-          pushd ttyd/html 1>/dev/null
-          corepack enable
-          corepack prepare yarn@1.22.22 --activate
-          yarn install
-          yarn run check
-          yarn run build
-          popd 1>/dev/null
-
-          # Backend
-          sudo apt-get update
-          sudo apt-get install -y autoconf automake build-essential cmake curl file libtool
-          mkdir -p release
-          BUILD_ARCHS="i686 x86_64 arm armhf aarch64 mips mipsel mips64 mips64el s390x win32"
-          pushd ttyd 1>/dev/null
-          for arch in $BUILD_ARCHS; do
-            if [[ -f build ]]; then
-              rm -rf build
-            fi
-            echo "**** Building for $arch ****"
-            BUILD_TARGET="$arch" scripts/cross-build.sh >/dev/null 2>&1
-            if [ "$arch" = 'win32' ]; then
-              mv build/ttyd* ../release/ttyd."$arch".exe
-            else
-              mv build/ttyd* ../release/ttyd."$arch"
-            fi
-          done
-          popd 1>/dev/null
-          pushd release 1>/dev/null
-          if [ $(ls -1 | wc -l) == $(
-            c() { echo $#; }
-            c $BUILD_ARCHS
-          ) ]; then
-            sha256sum ttyd.* >SHA256SUMS
-          else
-            echo "**** Build count mismatch ****"
-            exit 1
-          fi
-          popd 1>/dev/null
+          task ci:build
           echo "release=true" >> "$GITHUB_OUTPUT"
 
       - name: Release
@@ -129,4 +85,4 @@ jobs:
           artifacts: "release/*"
           tag: "${{ steps.check.outputs.tag || steps.force.outputs.tag }}"
           name: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }}"
-          body: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }} with font-display:block, document.fonts.load, and fontSize toggle re-measure fixes."
+          body: "nerd-ttyd ${{ steps.check.outputs.tag || steps.force.outputs.tag }}"

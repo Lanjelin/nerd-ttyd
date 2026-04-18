@@ -1,0 +1,73 @@
+diff --git a/html/src/components/terminal/index.tsx b/html/src/components/terminal/index.tsx
+index b42bf15..cc050e2 100644
+--- a/html/src/components/terminal/index.tsx
++++ b/html/src/components/terminal/index.tsx
+@@ -24,6 +24,7 @@ export class Terminal extends Component<Props, State> {
+ 
+     async componentDidMount() {
+         await this.xterm.refreshToken();
++        await document.fonts.load('14px JetBrains');
+         this.xterm.open(this.container);
+         this.xterm.connect();
+     }
+diff --git a/html/src/components/terminal/xterm/index.ts b/html/src/components/terminal/xterm/index.ts
+index b332154..2f61864 100644
+--- a/html/src/components/terminal/xterm/index.ts
++++ b/html/src/components/terminal/xterm/index.ts
+@@ -167,6 +167,18 @@ export class Xterm {
+ 
+         terminal.open(parent);
+         fitAddon.fit();
++        setTimeout(() => {
++            const fs = terminal.options.fontSize || 14;
++            terminal.options.fontSize = fs + 1;
++            terminal.options.fontSize = fs;
++            fitAddon.fit();
++        }, 250);
++        setTimeout(() => {
++            const fs = terminal.options.fontSize || 14;
++            terminal.options.fontSize = fs + 1;
++            terminal.options.fontSize = fs;
++            fitAddon.fit();
++        }, 1000);
+     }
+ 
+     @bind
+diff --git a/html/src/style/index.scss b/html/src/style/index.scss
+index 0f9244b..a22b5fd 100644
+--- a/html/src/style/index.scss
++++ b/html/src/style/index.scss
+@@ -16,3 +16,18 @@ body {
+     height: calc(100% - 10px);
+   }
+ }
++@font-face {
++  font-family: SarasaMono;
++  font-style: normal;
++  font-weight: normal;
++  font-display: block;
++  src: url("webfont/SarasaMonoSC-Regular.woff2") format("woff2");
++}
++
++@font-face {
++  font-family: JetBrains;
++  font-style: normal;
++  font-weight: normal;
++  font-display: block;
++  src: url("webfont/JetBrainsMono-Regular.woff2") format("woff2");
++}
+diff --git a/html/webpack.config.js b/html/webpack.config.js
+index 18bfcf3..2a556b1 100644
+--- a/html/webpack.config.js
++++ b/html/webpack.config.js
+@@ -20,6 +20,10 @@ const baseConfig = {
+     },
+     module: {
+         rules: [
++            {
++                test: /\.(ttf|otf|eot|woff|woff2)$/,
++                type: 'asset/inline',
++            },
+             {
+                 test: /\.tsx?$/,
+                 use: 'ts-loader',
