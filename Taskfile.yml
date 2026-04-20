@@ -53,7 +53,12 @@ tasks:
         for arch in ${BUILD_ARCHS:-{{.DEFAULT_ARCHS}}}; do \
           rm -rf build; \
           echo "**** Building for $arch ****"; \
-          BUILD_TARGET="$arch" scripts/cross-build.sh >/dev/null 2>&1; \
+          log_file="/tmp/ttyd-cross-build-$arch.log"; \
+          if ! BUILD_TARGET="$arch" scripts/cross-build.sh >"$log_file" 2>&1; then \
+            echo "**** cross-build failed for $arch ****"; \
+            cat "$log_file"; \
+            exit 1; \
+          fi; \
           if [ "$arch" = "win32" ]; then \
             mv build/ttyd* "$out_dir"/ttyd."$arch".exe; \
           else \
