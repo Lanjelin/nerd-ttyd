@@ -34,7 +34,7 @@ jobs:
             echo "**** Can't retrieve external release of ttyd, exiting ****"
             exit 1
           fi
-          NERD_TTYD=${NERD_TTYD:-$(curl --silent "https://api.github.com/repos/${{ github.repository }}/tags" | grep '"name":' | grep -Eo "[0-9]{1,2}.[0-9]{1,2}.[0-9]{1,2}" | sort -r | head -n1)}
+          NERD_TTYD=${NERD_TTYD:-$(curl --silent "https://api.github.com/repos/${{ github.repository }}/tags" | grep -Eo '"name": *"[0-9]+\.[0-9]+\.[0-9]+' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | sort -Vr | head -n1)}
           if [ -z "${NERD_TTYD}" ]; then
             echo "**** No existing tags, proceeding with build ****"
             NERD_TTYD="0.0.0"
